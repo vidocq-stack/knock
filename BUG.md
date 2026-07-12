@@ -159,3 +159,28 @@ workaround as upstream modules are fixed.
     Fixed: version.properties filtered by Maven next to the class, constant loaded at class
     init (same-module JPMS resource, no opens). No longer compile-time-inlineable, which
     also protects future consumers from the javac inlining trap.
+
+## BUG-20260712-02 — Unqualified HealthCheck bean rejected at deployment (spec violation)
+
+- **Date** : 2026-07-12
+- **Statut** : FIXED (1c60589, branch pr/ybl/health-unqualified-check-ignored)
+- **Module touché** : knock-cdi-vauban (`HealthCheckCdiExtension`)
+- **Symptôme** : deploying a CDI bean implementing `HealthCheck` without
+  `@Liveness`/`@Readiness`/`@Startup` failed the whole deployment with
+  `jakarta.enterprise.inject.spi.DeploymentException`. Official TCK
+  `EnforceQualifierTest` failed (1 FAILURE + 3 SKIP) when the TCK runs against the
+  assembled Vidocq runtime (`vidocq-runtime-tck-knock-health`).
+- **Reproduction minimale** :
+  ```
+  cd vidocq && ./mvnw -Ptck -pl vidocq-runtime-integration-tests/vidocq-runtime-tck-knock-health test
+  # -> EnforceQualifierTest.arquillianBeforeClass FAILURE (CDI deployment validation failed)
+  ```
+- **Hypothèse de cause** : the BCE quoted a non-existent spec sentence ("results in a
+  deployment error"). MP Health 4.0 §2 actually says an unqualified procedure "is not an
+  active procedure and should be ignored". The per-brick knock-tck harness bypassed the
+  BCE (manual scan in its custom Arquillian container), hiding the bug — only the
+  assembled-runtime runner exercised the real CDI path.
+- **Investigations** :
+  - 2026-07-12 : BCE downgraded to a warning; `HealthCheckRegistrar` already ignores
+    unqualified beans (resolves qualified `Instance<HealthCheck>` only). Unit test
+    inverted to assert the spec behaviour. Official MP Health TCK per-brick: 28/28 PASS.
