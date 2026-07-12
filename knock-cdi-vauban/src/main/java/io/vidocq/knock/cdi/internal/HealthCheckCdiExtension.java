@@ -31,14 +31,20 @@ import org.eclipse.microprofile.health.Startup;
 import jakarta.enterprise.inject.build.compatible.spi.BeanInfo;
 
 /**
- * Knock Build Compatible Extension — validates the presence of a probe qualifier
- * on every CDI bean implementing {@link HealthCheck}.
+ * Knock Build Compatible Extension — warns about CDI beans implementing
+ * {@link HealthCheck} without a probe qualifier.
  *
- * <p>MicroProfile Health 4.0 §4.2: "Health check procedures that do not carry one
- * of the three qualifiers result in a deployment error."</p>
+ * <p>MicroProfile Health 4.0 §2 (Different kinds of Health Checks): "A HealthCheck
+ * procedure with none of the above annotations is not an active procedure and
+ * should be ignored." The TCK ({@code EnforceQualifierTest}) deploys such a bean
+ * and expects a successful deployment whose {@code /health} response carries an
+ * empty checks array — so this must NOT be a deployment error, only a warning to
+ * help developers spot a probably-forgotten qualifier.</p>
  *
- * <p>This BCE only validates — registration in the registry is delegated to
- * {@link HealthCheckRegistrar} via standard CDI injection.</p>
+ * <p>This BCE only reports — registration in the registry is delegated to
+ * {@link HealthCheckRegistrar} via standard CDI injection, which naturally skips
+ * unqualified beans (it resolves {@code @Liveness}/{@code @Readiness}/{@code @Startup}
+ * instances only).</p>
  *
  * <p>Discovered via ServiceLoader:
  * {@code META-INF/services/jakarta.enterprise.inject.build.compatible.spi.BuildCompatibleExtension}
@@ -51,14 +57,15 @@ public class HealthCheckCdiExtension implements BuildCompatibleExtension {
     private static final String STARTUP   = Startup.class.getName();
 
     /**
-     * Spec §4.2: validates that every {@link HealthCheck} bean carries at least one of the
-     * three probe qualifiers. Reports a deployment error otherwise.
+     * Spec §2: a {@link HealthCheck} bean without any of the three probe qualifiers
+     * is not an active procedure. It is ignored at registration time; report a
+     * warning so the omission is visible.
      *
-     * @param bean     the CDI bean to validate
-     * @param messages deployment error collector
+     * @param bean     the CDI bean to inspect
+     * @param messages deployment message collector
      */
     @Registration(types = HealthCheck.class)
-    public void validateProbeQualifier(BeanInfo bean, Messages messages) {
+    public void warnOnMissingProbeQualifier(BeanInfo bean, Messages messages) {
         boolean hasProbe = bean.qualifiers().stream()
                 .anyMatch(q -> LIVENESS.equals(q.name())
                             || READINESS.equals(q.name())
@@ -67,10 +74,11 @@ public class HealthCheckCdiExtension implements BuildCompatibleExtension {
         if (!hasProbe) {
             ClassInfo declaring = bean.declaringClass();
             String className = declaring != null ? declaring.name() : "(unknown)";
-            messages.error(
+            messages.warn(
                     "Knock CDI: the HealthCheck bean '" + className
-                    + "' has no @Liveness, @Readiness, or @Startup qualifier"
-                    + " (MicroProfile Health 4.0 spec §4.2)",
+                    + "' has no @Liveness, @Readiness, or @Startup qualifier;"
+                    + " it is not an active procedure and will be ignored"
+                    + " (MicroProfile Health 4.0 spec §2)",
                     bean);
         }
     }

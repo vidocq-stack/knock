@@ -24,7 +24,6 @@ import io.vidocq.knock.runtime.KnockHealthService;
 import io.vidocq.knock.spi.HealthCheckRegistry;
 import io.vidocq.knock.spi.ProbeType;
 import io.vidocq.vauban.core.container.VaubanContainer;
-import jakarta.enterprise.inject.spi.DeploymentException;
 import org.eclipse.microprofile.health.HealthCheck;
 import org.eclipse.microprofile.health.HealthCheckResponse;
 import org.eclipse.microprofile.health.Liveness;
@@ -80,7 +79,7 @@ class HealthCheckCdiIntegrationTest {
         }
     }
 
-    /** Bean without a probe qualifier — must trigger a deployment error. */
+    /** Bean without a probe qualifier — not an active procedure, must be ignored. */
     @ApplicationScoped
     static class NoProbeCheck implements HealthCheck {
         @Override public HealthCheckResponse call() {
@@ -150,21 +149,24 @@ class HealthCheckCdiIntegrationTest {
     }
 
     // -----------------------------------------------------------------------
-    // §4.2 — HealthCheck bean without a probe qualifier -> DeploymentException
+    // §2 — HealthCheck bean without a probe qualifier is ignored
     // -----------------------------------------------------------------------
 
     @Test
-    void health_check_without_probe_annotation_fails_deployment_spec_section4_2() {
-        // Spec §4.2: "Health check procedures that do not carry one of the three
-        // qualifiers result in a deployment error."
-        assertThrows(
-                DeploymentException.class,
-                () -> {
-                    try (var container = buildContainer(NoProbeCheck.class)) {
-                        // The deployment is expected to fail before this container is used.
-                    }
-                },
-                "A HealthCheck bean without @Liveness/@Readiness/@Startup must fail deployment");
+    void health_check_without_probe_annotation_is_ignored_spec_section2() {
+        // Spec §2 (Different kinds of Health Checks): "A HealthCheck procedure with
+        // none of the above annotations is not an active procedure and should be
+        // ignored." The TCK (EnforceQualifierTest) deploys such a bean and expects
+        // a successful deployment with an empty checks array.
+        try (var container = buildContainer(NoProbeCheck.class)) {
+            HealthCheckRegistry registry = container.select(HealthCheckRegistry.class);
+            assertEquals(0, registry.getChecks(ProbeType.LIVENESS).size(),
+                    "An unqualified HealthCheck must not be registered as liveness");
+            assertEquals(0, registry.getChecks(ProbeType.READINESS).size(),
+                    "An unqualified HealthCheck must not be registered as readiness");
+            assertEquals(0, registry.getChecks(ProbeType.STARTUP).size(),
+                    "An unqualified HealthCheck must not be registered as startup");
+        }
     }
 
     // -----------------------------------------------------------------------
