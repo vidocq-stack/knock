@@ -29,7 +29,7 @@ Each check declares exactly one probe qualifier. The qualifier selects which end
 
 [NOTE]
 ====
-A `HealthCheck` bean with no probe qualifier is not a health-check procedure: per MicroProfile Health §4.2 it is an ordinary CDI bean, silently ignored — neither registered nor a deployment error. Only beans carrying `@Liveness`, `@Readiness`, or `@Startup` are registered as checks.
+A `HealthCheck` bean with no probe qualifier is rejected at deployment: Knock's Build Compatible Extension (`HealthCheckCdiExtension`) reports a deployment error naming the bean class (MicroProfile Health §4.2). Only beans carrying `@Liveness`, `@Readiness`, or `@Startup` are registered as checks.
 ====
 
 == Writing a check
@@ -82,16 +82,15 @@ The aggregate status of a probe group follows MicroProfile Health §3.2:
 
 * the global status is **DOWN** as soon as **one** check reports `DOWN`;
 * an **empty** check list yields **UP** (the probe is considered healthy);
-* an **exception** thrown by `HealthCheck.call()` is converted to a `DOWN` check whose `data` carries the exception class name — it never propagates out of the endpoint.
+* an **exception** thrown by `HealthCheck.call()` is converted to a `DOWN` check **named after the exception's simple class name**, with no `data` entry — it never propagates out of the endpoint.
 
 [source,json]
 ----
 {
   "status": "DOWN",
   "checks": [
-    { "name": "database", "status": "UP" },
-    { "name": "broker",   "status": "DOWN",
-      "data": { "error": "java.net.ConnectException" } }
+    { "name": "database",         "status": "UP" },
+    { "name": "ConnectException", "status": "DOWN" }
   ]
 }
 ----
@@ -106,9 +105,9 @@ Without CDI, register checks directly and ask the facade for a report:
 
 [source,java]
 ----
-HealthCheckRegistry registry = new KnockHealthCheckRegistry();
-registry.register(new DatabaseCheck());
-registry.register(new BrokerCheck());
+HealthCheckRegistry registry = HealthCheckRegistries.newRegistry();
+registry.register(ProbeType.LIVENESS,  "database",       new DatabaseCheck());
+registry.register(ProbeType.READINESS, "message-broker", new BrokerCheck());
 
 KnockHealthService service = new KnockHealthService(registry);
 
@@ -120,7 +119,7 @@ HealthReport all  = service.report(ProbeType.ALL);
 
 == With CDI (Vauban)
 
-Add `knock-cdi-vauban` and Knock discovers every `@Liveness/@Readiness/@Startup` bean automatically: `HealthCheckRegistrar` registers them when the application context is initialised. No manual registration is required.
+Add `knock-cdi-vauban` and Knock discovers every `@Liveness/@Readiness/@Startup` bean automatically: `HealthCheckRegistrar` observes `@Initialized(ApplicationScoped.class)` and registers each qualified bean by probe type, under the check's class name, while the Build Compatible Extension `HealthCheckCdiExtension` validates at deployment that every `HealthCheck` bean carries a probe qualifier. The registry itself is exposed as an `@ApplicationScoped` bean (`KnockCdiHealthCheckRegistry`, injectable as `HealthCheckRegistry`). No manual registration is required.
 
 == With Jakarta REST (Cassini)
 
